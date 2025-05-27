@@ -1,0 +1,13 @@
+[package]
+name = "rust-client-single"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.8"
+rand_chacha = "0.3.1"
+rand_core = "0.6.4"
+curve25519-dalek = "4"
+ed25519-dalek = { version = "1.0.1", features = ["rand"] }
+sha2 = "0.10"
+subtle = "2"
