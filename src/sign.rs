@@ -2,21 +2,19 @@ use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT,
     ristretto::{CompressedRistretto, RistrettoPoint},
     scalar::Scalar,
-    traits::Identity,          //Scalar::default()
 };
+use ecvrf::{prove, verify, VrfPk, VrfSk, VrfProof};
 use subtle::CtOption;
-use subtle::Choice;
-//use ed25519_dalek::{Keypair, PublicKey, SecretKey};
 use rand::rngs::OsRng;
-use sha2::{Sha512, Digest};
+use sha2::{Sha512, Sha256, Digest};
 use rand_chacha::ChaChaRng;
 use rand_core::{SeedableRng, RngCore};
 
-struct Commitment {
+pub struct Commitment {
     pub R: RistrettoPoint,
 }
 
-struct Secret {
+pub struct Secret {
     pub r: Scalar,
 }
 
@@ -53,32 +51,19 @@ impl Cosigners {
 
         // 2. 집계 마스크(bit-mask): 활성 코사이너 1, 비활성 0
         //   여기서는 sig_parts 길이에 맞춰 모두 참여했다고 가정
-        let mut mask = vec![0u8; (self.pub_keys.len() + 7) / 8];
+        //마스크 생성 안함.
+        /* let mut mask = vec![0u8; (self.pub_keys.len() + 7) / 8];
         for i in 0..self.pub_keys.len() {
             mask[i / 8] |= 1 << (i % 8);
-        }
+        } */
 
         // 3. 직렬화: 32B R + 32B S + mask
-        let mut sig = Vec::with_capacity(64 + mask.len());
+        let mut sig = Vec::with_capacity(64 /* + mask.len() */);
         sig.extend_from_slice(agg_commit.compress().as_bytes()); // R
         sig.extend_from_slice(&agg_s.to_bytes());                // S
-        sig.extend_from_slice(&mask);                            // mask
+        //sig.extend_from_slice(&mask);                          // mask 생성안함
         sig
     }
-}
-
-fn compute_challenge(
-    agg_commit_bytes: &[u8],
-    agg_pk_bytes: &[u8],
-    message: &[u8],
-) -> Scalar {
-    let mut hasher = Sha512::new();
-    hasher.update(agg_commit_bytes);
-    hasher.update(agg_pk_bytes);
-    hasher.update(message);
-
-    let hash_result = hasher.finalize(); // 64 bytes
-    Scalar::from_bytes_mod_order_wide(&hash_result[..64].try_into().unwrap())
 }
 
 pub fn cosign(
@@ -103,7 +88,7 @@ pub fn cosign(
     SignaturePart { s }
 }
 
-fn cosi_commit(seed: &str) -> (Commitment, Secret) {
+pub fn cosi_commit(seed: &str) -> (Commitment, Secret) {
     // Step 1: SHA512(seed)
     let mut hasher = Sha512::new();
     hasher.update(seed.as_bytes());
@@ -134,43 +119,16 @@ pub fn generate_keys() -> (RistrettoPoint, Scalar) {
     (pk, sk)
 }
 
-pub fn sign_aggregate_example(
-    message: &str,
-    pub_keys: &[RistrettoPoint ],
-    pri_key1: Scalar,
-    pri_key2: Scalar,
-    pri_key3: Scalar,
-) -> Vec<u8> {
-    let (commit1, secret1) = cosi_commit(message);
-    let (commit2, secret2) = cosi_commit(message);
-    let (commit3, secret3) = cosi_commit(message);
-    let commits = vec![commit1, commit2, commit3];
-
-    let cosigners = Cosigners::new(pub_keys.to_vec());
-    let agg_pk = cosigners.aggregate_public_key();
-    let agg_commit = cosigners.aggregate_commit(&commits);
-
-    let sig1 = cosign(&pri_key1, &secret1.r, message.as_bytes(), &agg_pk, &agg_commit);
-    let sig2 = cosign(&pri_key2, &secret2.r, message.as_bytes(), &agg_pk, &agg_commit);
-    let sig3 = cosign(&pri_key3, &secret3.r, message.as_bytes(), &agg_pk, &agg_commit);
-
-    let sig_parts = vec![sig1, sig2, sig3];
-
-    cosigners.aggregate_signature(agg_commit, &sig_parts)
-}
-
 pub fn verify_aggregate_signature(
     pub_keys: &[RistrettoPoint],
     message:   &[u8],
     sig:       &[u8],            // 직렬화된 집단서명
 ) -> bool {
     /* ---------- 1. 길이·형식 검사 ---------- */
-    let mask_len = (pub_keys.len() + 7) / 8;
-    if sig.len() != 64 + mask_len {
-        return false;
-    }
-    let (r_bytes, rest) = sig.split_at(32);
-    let (s_bytes, mask) = rest.split_at(32);
+    //let mask_len = (pub_keys.len() + 7) / 8;
+    if sig.len() != 64 /* + mask_len */ { return false; }
+    let (r_bytes, s_bytes /* rest */) = sig.split_at(32);
+    //let (s_bytes, mask) = rest.split_at(32);
 
     /* ---------- 2. R 복원 ---------- */
     let r_comp = match CompressedRistretto::from_slice(r_bytes) {
@@ -185,19 +143,17 @@ pub fn verify_aggregate_signature(
     /* ---------- 3. S 복원 & 정칙성 ---------- */
     let s_ct: CtOption<Scalar> =
         Scalar::from_canonical_bytes(s_bytes.try_into().unwrap());
-    if s_ct.is_some().unwrap_u8() == 0 {
-        return false;                             // 비정칙 스칼라
-    }
+    if s_ct.is_some().unwrap_u8() == 0 { return false; }
     let s_scalar = s_ct.unwrap();
 
     /* ---------- 4. 집계 공개키 A = Σ P_i (mask 적용) ---------- */
-    let agg_pk = pub_keys.iter().enumerate().fold(
+    let agg_pk = pub_keys.iter()/* .enumerate() */.fold(
         RistrettoPoint::default(),
-        |acc, (i, pk)| {
-            let bit = (mask[i / 8] >> (i % 8)) & 1;
+        |acc, pk| acc + pk);
+            /* let bit = (mask[i / 8] >> (i % 8)) & 1;
             if bit == 1 { acc + pk } else { acc }
         },
-    );
+    ); */
 
     /* ---------- 5. 챌린지 c = H(R ‖ A ‖ m) ---------- */
     let mut h = Sha512::new();
@@ -211,4 +167,50 @@ pub fn verify_aggregate_signature(
     let lhs = &s_scalar * &RISTRETTO_BASEPOINT_POINT; // s·B
     let rhs = r_point + c * agg_pk;                    // R + c·A
     lhs == rhs
+}
+
+// 0‥1 실수값으로 변환 (상위 8 바이트만 사용)
+fn hash_ratio(vrf_output: &[u8]) -> f64 {
+    let h = Sha256::digest(vrf_output);
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&h[..8]);
+    (u64::from_be_bytes(b) as f64) / (u64::MAX as f64)
+}
+
+/// N-of-N 환경: threshold=1.0 → 모든 노드 선출
+pub fn generate_vrf_output(
+    seed:      &str,
+    pub_key:   &RistrettoPoint,   // ← 공개키(RistrettoPoint)
+    sec_key:   &Scalar,           // ← 비밀스칼라
+    threshold: f64,
+) -> Option<Vec<u8>> {
+    /* 1. 메시지 = SHA-256(seed) */
+    let msg = Sha256::digest(seed.as_bytes());
+
+    /* 2. RistrettoPoint‧Scalar → ecvrf 키 구조체 */
+    let sk_bytes = sec_key.to_bytes();
+    let vrf_sk   = VrfSk::from_bytes(&sk_bytes).expect("bad scalar");
+
+    let pk_bytes = pub_key.compress().to_bytes();       // 32B
+    let vrf_pk   = VrfPk::from_bytes(&pk_bytes).expect("bad point");
+
+    /* 3. prove → (hash, proof) */
+    let (vrf_hash, proof): ([u8; 32], VrfProof) =
+        prove(&msg, &vrf_sk);
+
+    /* 4. verify */
+    if !verify(&msg, &vrf_pk, &vrf_hash, &proof) {
+        return None;                                    // 검증 실패
+    }
+
+    /* 5. ratio & sortition */
+    let ratio = hash_ratio(&vrf_hash);
+    let selected = ratio < threshold;
+    println!("EXECUTING_VRF_RATIO_RESULT: {ratio}  selected={selected}");
+
+    if selected {
+        Some(proof.to_bytes().to_vec())                 // π 반환
+    } else {
+        None
+    }
 }

@@ -11,3 +11,4 @@ curve25519-dalek = "4"
 ed25519-dalek = { version = "1.0.1", features = ["rand"] }
 sha2 = "0.10"
 subtle = "2"
+ecvrf = "0.4.4"
