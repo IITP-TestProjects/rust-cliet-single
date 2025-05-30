@@ -9,14 +9,15 @@ use rand::rngs::OsRng;
 use sha2::{Sha512, Sha256, Digest};
 use rand_chacha::ChaChaRng;
 use rand_core::{SeedableRng, RngCore};
+use zeroize::Zeroize;
 
 pub struct Commitment {
     pub R: RistrettoPoint,
 }
 
-pub struct Secret {
-    pub r: Scalar,
-}
+#[derive(Zeroize)]
+#[zeroize(drop)]
+pub struct Secret (Scalar);
 
 pub struct Cosigners {
     pub_keys: Vec<RistrettoPoint>,
@@ -24,6 +25,14 @@ pub struct Cosigners {
 
 pub struct SignaturePart {
     pub s: Scalar,
+}
+
+impl Secret {
+    pub fn new(s: Scalar) -> Self { Secret(s)}
+    fn into_inner(self) -> Scalar {
+        let Secret(s) = self;
+        s
+    }
 }
 
 impl Cosigners {
@@ -68,7 +77,7 @@ impl Cosigners {
 
 pub fn cosign(
     sk: &Scalar,
-    secret_r: &Scalar,
+    secret: Secret,
     message: &[u8],
     aggregate_pk: &RistrettoPoint,
     aggregate_commit: &RistrettoPoint,
@@ -82,7 +91,8 @@ pub fn cosign(
     let hash_result = hasher.finalize(); // 64 bytes
     let c = Scalar::from_bytes_mod_order_wide(&hash_result[..64].try_into().unwrap());
 
-    // s = r + c * sk
+    //s = r + c * sk
+    let secret_r = secret.into_inner(); // 비밀 스칼라 r
     let s = secret_r + c * sk;
 
     SignaturePart { s }
@@ -106,7 +116,7 @@ pub fn cosi_commit(seed: &str) -> (Commitment, Secret) {
 
     (
         Commitment { R },
-        Secret { r },
+        Secret::new(r),
     )
 }
 
