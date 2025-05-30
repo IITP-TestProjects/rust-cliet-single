@@ -59,6 +59,8 @@ fn main() {
         // server 2. metric data, vrfOutput, publicKey를 verify 노드에 보내서 커미티 선정 정보 수신
         // vrf output, publickey, seed를 활용해 실제 해당 노드가 threshold를 만족하는지 검증가능하므로
         // server 3. 수신한 커미티에 대해서 압축 public key 및 압축 commit 생성
+
+        // 커미티가 생성된 이후에는 pub_keys 집계는 필요없음. -> 별개의 RPC를 통해 commitment만 압축해서 전달
         let pub_keys = vec![
             pub_key1, pub_key2, pub_key3, pub_key4, pub_key5, pub_key6, pub_key7, pub_key8,
             pub_key9, pub_key10,
@@ -68,6 +70,7 @@ fn main() {
             commit10,
         ];
 
+        // 현재는 서버와 같은 코드 내이지만, 실제로는 전달된 데이터를 통해 client측에서도 cosigners를 생성해야 함.
         let cosigners = sign::Cosigners::new(pub_keys.to_vec());
         let agg_pk = cosigners.aggregate_public_key();
         let agg_commit = cosigners.aggregate_commit(&commits);
@@ -158,6 +161,7 @@ fn main() {
 
         // agg_sig  (Vec<u8> – 직렬화된 서명)
         println!("agg_sig: {} bytes", agg_sig.len());
+
         thread::sleep(Duration::from_secs(5));
     }
 }
