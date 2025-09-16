@@ -34,9 +34,19 @@ fn main() {
         "seed-node10",
     ];
 
-    // client 2: 각 노드별 vrfoutput 생성 |-> verify node에서 필요할 뿐 해당 예제에서 실제 필요하지는 않음.
-    // 해당 데이터는 RequestCommittee RPC를 호출할때 전달되어야 하는 값임.
-    // VRF 데모는 비활성화
+    // client 2: 각 노드별 VRF 출력 생성(데모). Ed25519 seed에서 VRF 키를 유도해 사용
+    let _vrf_proof1  = sign::generate_vrf_output_from_ed25519(seeds[0], &pub_key1,  &priv_key1,  1.0);
+    let _vrf_proof2  = sign::generate_vrf_output_from_ed25519(seeds[1], &pub_key2,  &priv_key2,  1.0);
+    let _vrf_proof3  = sign::generate_vrf_output_from_ed25519(seeds[2], &pub_key3,  &priv_key3,  1.0);
+    let _vrf_proof4  = sign::generate_vrf_output_from_ed25519(seeds[3], &pub_key4,  &priv_key4,  1.0);
+    let _vrf_proof5  = sign::generate_vrf_output_from_ed25519(seeds[4], &pub_key5,  &priv_key5,  1.0);
+    let _vrf_proof6  = sign::generate_vrf_output_from_ed25519(seeds[5], &pub_key6,  &priv_key6,  1.0);
+    let _vrf_proof7  = sign::generate_vrf_output_from_ed25519(seeds[6], &pub_key7,  &priv_key7,  1.0);
+    let _vrf_proof8  = sign::generate_vrf_output_from_ed25519(seeds[7], &pub_key8,  &priv_key8,  1.0);
+    let _vrf_proof9  = sign::generate_vrf_output_from_ed25519(seeds[8], &pub_key9,  &priv_key9,  1.0);
+    let _vrf_proof10 = sign::generate_vrf_output_from_ed25519(seeds[9], &pub_key10, &priv_key10, 1.0);
+
+    println!("--- CoSi Signature with Roster Hash Example --- {:?}", _vrf_proof1);
 
     loop {
         // client 3: 각 노드별 commit 생성
@@ -72,7 +82,7 @@ fn main() {
         let cosigners = sign::Cosigners::new(pub_keys.to_vec());
         let agg_pk = cosigners.aggregate_public_key();
         let agg_commit = cosigners.aggregate_commit(&commits);
-        // 정렬 기반 로스터 해시 값 계산
+        // 정렬 기반 로스터 해시 계산
         let roster_hash = sign::compute_roster_hash(&pub_keys);
         // server 4. 생성한 agg_pk, agg_commit을 각 노드에 전달(JoinNetwork로 boradcast)
         // 반환하는 데이터: round, nodeIds(committees), agg_pk, agg_commit, publicKeys, rosterHash

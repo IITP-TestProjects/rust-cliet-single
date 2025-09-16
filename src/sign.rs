@@ -1,9 +1,11 @@
 use curve25519_dalek::{
-    constants::ED25519_BASEPOINT_POINT,
+    constants::{ED25519_BASEPOINT_POINT, RISTRETTO_BASEPOINT_POINT},
     edwards::{CompressedEdwardsY, EdwardsPoint},
+    ristretto::{CompressedRistretto, RistrettoPoint},
     scalar::Scalar,
     traits::Identity,
 };
+use ecvrf::{prove, verify, VrfPk, VrfSk, VrfProof};
 use subtle::CtOption;
 use rand::rngs::OsRng;
 use sha2::{Sha512, Sha256, Digest};
@@ -346,6 +348,79 @@ pub fn verify_aggregate_signature_with_mask(
     let lhs = &s_scalar * &ED25519_BASEPOINT_POINT; // s·B
     let rhs = r_point + c * agg_pk;                    // R + c·A(masked)
     lhs == rhs
+}
+
+// ---------------- VRF demo (Ristretto-based, independent of Ed25519 keys) ----------------
+
+// 0‥1 실수값으로 변환 (상위 8 바이트만 사용)
+fn hash_ratio(vrf_output: &[u8]) -> f64 {
+    let h = Sha256::digest(vrf_output);
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&h[..8]);
+    (u64::from_be_bytes(b) as f64) / (u64::MAX as f64)
+}
+
+/// VRF용 키쌍(Ristretto 기반)을 생성: (pk_bytes(32B), sk_bytes(32B))
+pub fn generate_vrf_keypair() -> ([u8; 32], [u8; 32]) {
+    let mut rng = OsRng;
+    let mut sk_wide = [0u8; 64];
+    rng.fill_bytes(&mut sk_wide);
+    let sk = Scalar::from_bytes_mod_order_wide(&sk_wide);
+    let pk_point: RistrettoPoint = &sk * &RISTRETTO_BASEPOINT_POINT;
+    let pk_bytes: [u8; 32] = pk_point.compress().to_bytes();
+    (pk_bytes, sk.to_bytes())
+}
+
+/// ecvrf로 VRF 출력(π)을 생성/검증하는 데모 함수(Ristretto 기반 키 사용)
+pub fn generate_vrf_output(
+    seed: &str,
+    vrf_pk_bytes: &[u8; 32],
+    vrf_sk_bytes: &[u8; 32],
+    threshold: f64,
+) -> Option<Vec<u8>> {
+    let msg = Sha256::digest(seed.as_bytes());
+
+    let vrf_sk = VrfSk::from_bytes(vrf_sk_bytes).expect("bad scalar");
+    let vrf_pk = VrfPk::from_bytes(vrf_pk_bytes).expect("bad point");
+
+    let (vrf_hash, proof): ([u8; 32], VrfProof) = prove(&msg, &vrf_sk);
+    if !verify(&msg, &vrf_pk, &vrf_hash, &proof) { return None; }
+
+    let ratio = hash_ratio(&vrf_hash);
+    let selected = ratio < threshold;
+    if selected { Some(proof.to_bytes().to_vec()) } else { None }
+}
+
+/// Ed25519 키(seed)를 바탕으로 Ristretto VRF 키를 결정론적으로 유도하여 VRF를 수행
+/// - ed_pub는 인터페이스 통일을 위한 인자이며, 내부 유도에는 사용하지 않음
+pub fn generate_vrf_output_from_ed25519(
+    seed: &str,
+    _ed_pub: &EdwardsPoint,
+    ed_seed: &[u8; 32],
+    threshold: f64,
+) -> Option<Vec<u8>> {
+    // 메시지 해시
+    let msg = Sha256::digest(seed.as_bytes());
+
+    // 도메인 분리된 해시로 Ristretto 스칼라 유도
+    let mut h = Sha512::new();
+    h.update(b"VRF-ristretto-from-ed25519-seed");
+    h.update(ed_seed);
+    let wide = h.finalize(); // 64B
+    let mut wide_arr = [0u8; 64];
+    wide_arr.copy_from_slice(&wide);
+    let vrf_sk_scalar = Scalar::from_bytes_mod_order_wide(&wide_arr);
+    let vrf_pk_point: RistrettoPoint = &vrf_sk_scalar * &RISTRETTO_BASEPOINT_POINT;
+    let vrf_pk_bytes = vrf_pk_point.compress().to_bytes();
+    let vrf_sk_bytes = vrf_sk_scalar.to_bytes();
+
+    let vrf_sk = VrfSk::from_bytes(&vrf_sk_bytes).ok()?;
+    let vrf_pk = VrfPk::from_bytes(&vrf_pk_bytes).ok()?;
+
+    let (vrf_hash, proof): ([u8; 32], VrfProof) = prove(&msg, &vrf_sk);
+    if !verify(&msg, &vrf_pk, &vrf_hash, &proof) { return None; }
+    let ratio = hash_ratio(&vrf_hash);
+    if ratio < threshold { Some(proof.to_bytes().to_vec()) } else { None }
 }
 
 // VRF 관련 예제 코드는 Ed25519 호환 작업 범위를 넘어가므로 제거했습니다.
